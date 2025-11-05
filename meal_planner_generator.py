@@ -1,181 +1,279 @@
-import streamlit as st
-import requests
-import json
-import time
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Structured AI Meal Planner</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom font and basic styling */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container-card {
+            max-width: 900px;
+            width: 95%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        .loading-indicator {
+            border-top-color: #0b72e5;
+            -webkit-animation: spinner 0.8s linear infinite;
+            animation: spinner 0.8s linear infinite;
+        }
+        @-webkit-keyframes spinner {
+            0% { -webkit-transform: rotate(0deg); }
+            100% { -webkit-transform: rotate(360deg); }
+        }
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="p-4">
 
-# --- Gemini API Setup (MUST be available globally for Streamlit) ---
-# NOTE: The apiKey is left blank. Streamlit Cloud automatically handles
-# providing the API key at runtime if the project is run inside Canvas.
-# If running locally, replace "" with your actual API Key.
-API_KEY = ""
-MODEL_NAME = "gemini-2.5-flash-preview-05-20" 
-API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
+<div class="container-card bg-white p-6 md:p-10 rounded-xl">
+    <h1 class="text-3xl md:text-4xl font-extrabold text-gray-900 mb-2">Structured Meal Planner AI</h1>
+    <p class="text-md text-gray-500 mb-8">This app demonstrates **JSON Schema enforcement** by guaranteeing a predictable, structured meal plan output from the Gemini API.</p>
 
-st.set_page_config(layout="wide", page_title="Structured Meal Planner")
+    <!-- User Input Form -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div>
+            <label for="cuisine" class="block text-sm font-medium text-gray-700 mb-1">Cuisine Style</label>
+            <input type="text" id="cuisine" value="Mediterranean" placeholder="e.g., Italian, Vegan, Low-Carb" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+        </div>
+        <div>
+            <label for="allergens" class="block text-sm font-medium text-gray-700 mb-1">Allergens / Dietary Needs (Optional)</label>
+            <input type="text" id="allergens" value="Gluten-free, no peanuts" placeholder="e.g., Dairy-free, no pork" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+        </div>
+    </div>
+    
+    <button id="generateButton" 
+            onclick="generateMealPlan()"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 shadow-md flex items-center justify-center">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 mr-2">
+            <path fill-rule="evenodd" d="M11.47 2.47a.75.75 0 0 1 1.06 0l7.5 7.5a.75.75 0 1 1-1.06 1.06L12 4.06 4.03 11.03a.75.75 0 0 1-1.06-1.06l7.5-7.5Z" clip-rule="evenodd" />
+            <path fill-rule="evenodd" d="M12 2.25a.75.75 0 0 1 .75.75v16.19l1.72-1.72a.75.75 0 1 1 1.06 1.06l-3 3a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 1 1 1.06-1.06l1.72 1.72V3a.75.75 0 0 1 .75-.75Z" clip-rule="evenodd" />
+        </svg>
+        Generate Meal Plan
+    </button>
+    
+    <!-- Output Section -->
+    <div class="mt-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2">Generated Meal Plan (JSON Output)</h2>
+        
+        <div id="loading" class="hidden flex items-center justify-center p-8">
+            <div class="loading-indicator ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mr-4"></div>
+            <span class="text-blue-600 font-medium">Generating structured plan...</span>
+        </div>
 
-# --- Structured Output Schema (The most important part!) ---
-# Define the exact JSON structure we expect the model to return.
-# This forces the model to deliver machine-readable data.
-MEAL_PLAN_SCHEMA = {
-    "type": "ARRAY",
-    "items": {
-        "type": "OBJECT",
-        "properties": {
-            "day": {"type": "STRING"},
-            "breakfast": {
-                "type": "OBJECT",
-                "properties": {
-                    "mealName": {"type": "STRING"},
-                    "ingredients": {"type": "ARRAY", "items": {"type": "STRING"}},
-                    "calories": {"type": "INTEGER"}
-                },
-                "propertyOrdering": ["mealName", "ingredients", "calories"]
+        <div id="error-message" class="hidden p-4 bg-red-100 text-red-700 border border-red-400 rounded-lg"></div>
+
+        <pre id="jsonOutput" class="bg-gray-800 text-green-300 p-4 rounded-lg text-sm overflow-x-auto whitespace-pre-wrap"></pre>
+
+        <div id="parsedOutput" class="mt-6">
+            <!-- Parsed and rendered table goes here -->
+        </div>
+    </div>
+</div>
+
+<script>
+    // Set mandatory API key and model URL
+    const apiKey = ""; 
+    // FIX APPLIED HERE: Changed to the mandatory current model name
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+    // --- JSON Schema Definition (The Proof Point for Your Resume) ---
+    // This schema strictly defines the structure of the model's output.
+    const MEAL_PLAN_SCHEMA = {
+        type: "ARRAY",
+        description: "A comprehensive meal plan array for one week.",
+        items: {
+            type: "OBJECT",
+            properties: {
+                day: { type: "STRING", description: "The day of the week (e.g., Monday)." },
+                meals: {
+                    type: "ARRAY",
+                    items: {
+                        type: "OBJECT",
+                        properties: {
+                            mealType: { type: "STRING", description: "Breakfast, Lunch, or Dinner." },
+                            recipeName: { type: "STRING", description: "The name of the recipe." },
+                            description: { type: "STRING", description: "A brief description of the meal." },
+                            calories: { type: "INTEGER", description: "Estimated caloric count." }
+                        },
+                        propertyOrdering: ["mealType", "recipeName", "description", "calories"]
+                    },
+                    description: "List of meals for the specific day."
+                }
             },
-            "lunch": {
-                "type": "OBJECT",
-                "properties": {
-                    "mealName": {"type": "STRING"},
-                    "ingredients": {"type": "ARRAY", "items": {"type": "STRING"}},
-                    "calories": {"type": "INTEGER"}
-                },
-                "propertyOrdering": ["mealName", "ingredients", "calories"]
-            },
-            "dinner": {
-                "type": "OBJECT",
-                "properties": {
-                    "mealName": {"type": "STRING"},
-                    "ingredients": {"type": "ARRAY", "items": {"type": "STRING"}},
-                    "calories": {"type": "INTEGER"}
-                },
-                "propertyOrdering": ["mealName", "ingredients", "calories"]
-            }
-        },
-        "propertyOrdering": ["day", "breakfast", "lunch", "dinner"]
+            propertyOrdering: ["day", "meals"]
+        }
+    };
+
+    /**
+     * Helper function for exponential backoff during API calls.
+     * @param {number} attempt The current retry attempt number.
+     * @returns {number} The delay in milliseconds.
+     */
+    function getDelay(attempt) {
+        return Math.pow(2, attempt) * 1000 + Math.random() * 1000;
     }
-}
 
-# --- System Instruction ---
-SYSTEM_PROMPT = """You are an expert nutritionist and meal planner. Your sole task is to generate a comprehensive 7-day meal plan based on the user's specific dietary requirements.
+    /**
+     * Main function to call the Gemini API with structured output enforcement.
+     */
+    async function generateMealPlan() {
+        const cuisine = document.getElementById('cuisine').value;
+        const allergens = document.getElementById('allergens').value;
+        const jsonOutput = document.getElementById('jsonOutput');
+        const parsedOutput = document.getElementById('parsedOutput');
+        const loading = document.getElementById('loading');
+        const errorDiv = document.getElementById('error-message');
+        const button = document.getElementById('generateButton');
 
-RULES:
-1. The response MUST be a JSON array that strictly adheres to the provided JSON schema.
-2. The total calories for the 7-day plan must meet the user's daily target as closely as possible, spread across the three meals.
-3. Every ingredient must be simple and easily available.
-4. DO NOT include any text or markdown outside of the JSON structure.
-"""
+        // Reset UI
+        jsonOutput.textContent = '';
+        parsedOutput.innerHTML = '';
+        errorDiv.textContent = '';
+        errorDiv.classList.add('hidden');
+        button.disabled = true;
+        loading.classList.remove('hidden');
 
-def generate_meal_plan(dietary_reqs):
-    """Calls the Gemini API to generate a structured meal plan."""
-    
-    user_query = f"Generate a 7-day meal plan for a diet of: {dietary_reqs}"
-    
-    payload = {
-        "contents": [{"parts": [{"text": user_query}]}],
-        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": MEAL_PLAN_SCHEMA
+        const prompt = `Create a 7-day meal plan. The cuisine style should be '${cuisine}'.
+                        The plan must account for the following dietary needs/allergens: '${allergens}'.
+                        The final output MUST strictly adhere to the provided JSON Schema for structured data enforcement.`;
+
+        const payload = {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+                responseMimeType: "application/json",
+                responseSchema: MEAL_PLAN_SCHEMA
+            },
+            // The model is set via the apiUrl constant above (the fix is here)
+        };
+
+        const maxRetries = 3;
+        let response = null;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    break; // Success! Exit loop.
+                }
+
+                // If response is not ok (e.g., 429, 500, etc.), retry (excluding 403/404 which won't fix themselves)
+                if (response.status === 403 || response.status === 404) {
+                    throw new Error(`API Error ${response.status}: ${response.statusText}. Check model name or API key permissions.`);
+                }
+
+                if (attempt < maxRetries - 1) {
+                    const delay = getDelay(attempt);
+                    // console.log(`Attempt ${attempt + 1} failed. Retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    throw new Error(`Failed after ${maxRetries} attempts: ${response.statusText}`);
+                }
+
+            } catch (error) {
+                loading.classList.add('hidden');
+                errorDiv.textContent = `Error: ${error.message}. Please check your browser console for details.`;
+                errorDiv.classList.remove('hidden');
+                button.disabled = false;
+                return;
+            }
+        }
+
+        loading.classList.add('hidden');
+        button.disabled = false;
+
+        try {
+            const result = await response.json();
+            const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+            if (!jsonText) {
+                const errorMessage = result.error?.message || 'Model generated no content or an unexpected error occurred.';
+                jsonOutput.textContent = `API Response Error:\n${JSON.stringify(result, null, 2)}`;
+                errorDiv.textContent = `Generation Failed: ${errorMessage}`;
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            // Display raw JSON output
+            jsonOutput.textContent = jsonText;
+
+            // Parse and render the structured output
+            const parsedData = JSON.parse(jsonText);
+            renderMealPlanTable(parsedData, parsedOutput);
+
+        } catch (e) {
+            errorDiv.textContent = `Parsing Error: The model did not return valid JSON. ${e.message}`;
+            errorDiv.classList.remove('hidden');
+            // Show any response we received if parsing failed
+            if (response) {
+                 jsonOutput.textContent = await response.text();
+            }
         }
     }
-    
-    headers = {'Content-Type': 'application/json'}
-    
-    # Simple retry logic with exponential backoff
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(API_URL, headers=headers, data=json.dumps(payload))
-            response.raise_for_status() # Raise exception for bad status codes
-            
-            result = response.json()
-            
-            # Extract and parse the JSON response text
-            json_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text')
-            
-            if json_text:
-                return json.loads(json_text)
-            else:
-                st.error("Model did not return valid content. Retrying...")
-                time.sleep(2 ** attempt)
-                continue
 
-        except requests.exceptions.HTTPError as e:
-            if response.status_code in [429, 500, 503] and attempt < max_retries - 1:
-                st.warning(f"API Rate Limit or Server Error ({response.status_code}). Retrying in {2 ** attempt} seconds...")
-                time.sleep(2 ** attempt)
-            else:
-                st.error(f"HTTP Error: {e} - Could not connect to API.")
-                return None
-        except requests.exceptions.ConnectionError:
-            st.error("Connection Error: Could not reach the API.")
-            return None
-        except json.JSONDecodeError:
-            st.error("Error: Model returned non-JSON data. Please try adjusting your request.")
-            st.code(json_text) 
-            return None
-        except Exception as e:
-            st.error(f"An unexpected error occurred: {e}")
-            return None
-    return None
+    /**
+     * Renders the structured meal plan data into a readable HTML table.
+     * @param {Array<Object>} data The parsed meal plan array.
+     * @param {HTMLElement} container The container to render the table into.
+     */
+    function renderMealPlanTable(data, container) {
+        let html = '<div class="space-y-6">';
 
-def display_meal_plan(plan_data):
-    """Displays the structured meal plan data in a clean Streamlit table/dataframe."""
-    
-    # Flatten the JSON data into a simple DataFrame-like structure for display
-    display_data = []
-    
-    for day_entry in plan_data:
-        day = day_entry.get('day', 'N/A')
+        data.forEach(dayPlan => {
+            html += `
+                <div class="border border-gray-200 rounded-xl overflow-hidden">
+                    <h3 class="bg-blue-100 text-blue-800 text-lg font-semibold p-4">${dayPlan.day}</h3>
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/5">Meal</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">Recipe</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">Description</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/5">Calories</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+            `;
+            
+            dayPlan.meals.forEach(meal => {
+                html += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">${meal.mealType}</td>
+                        <td class="px-4 py-2 text-sm text-gray-800">${meal.recipeName}</td>
+                        <td class="px-4 py-2 text-sm text-gray-500">${meal.description}</td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">${meal.calories}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        });
         
-        display_data.append({
-            'Day': day,
-            'Meal': 'Breakfast',
-            'Name': day_entry.get('breakfast', {}).get('mealName', 'N/A'),
-            'Ingredients': ', '.join(day_entry.get('breakfast', {}).get('ingredients', [])),
-            'Calories': day_entry.get('breakfast', {}).get('calories', 'N/A')
-        })
-        display_data.append({
-            'Day': day,
-            'Meal': 'Lunch',
-            'Name': day_entry.get('lunch', {}).get('mealName', 'N/A'),
-            'Ingredients': ', '.join(day_entry.get('lunch', {}).get('ingredients', [])),
-            'Calories': day_entry.get('lunch', {}).get('calories', 'N/A')
-        })
-        display_data.append({
-            'Day': day,
-            'Meal': 'Dinner',
-            'Name': day_entry.get('dinner', {}).get('mealName', 'N/A'),
-            'Ingredients': ', '.join(day_entry.get('dinner', {}).get('ingredients', [])),
-            'Calories': day_entry.get('dinner', {}).get('calories', 'N/A')
-        })
+        html += '</div>';
+        container.innerHTML = html;
+    }
+</script>
 
-    st.subheader("✅ Generated 7-Day Structured Meal Plan")
-    st.dataframe(
-        display_data, 
-        use_container_width=True,
-        hide_index=True,
-        column_order=('Day', 'Meal', 'Name', 'Calories', 'Ingredients')
-    )
-    
-# --- Streamlit UI ---
-st.title("🍽️ Structured AI Meal Planner")
-st.markdown("Use this tool to generate a 7-day meal plan customized to your diet, caloric goals, and preferences. This application demonstrates **structured output (JSON) enforcement** on the Gemini model.")
-
-with st.sidebar:
-    st.header("Plan Requirements")
-    diet = st.text_input("Diet Type (e.g., Keto, Vegan, Gluten-Free)", "Balanced")
-    calories = st.number_input("Daily Calorie Target", min_value=1000, max_value=4000, value=2000, step=100)
-    preferences = st.text_area("Specific Preferences/Dislikes (e.g., Prefers chicken and fish, dislikes onions)", "Prefers quick preparation time. Focus on high protein.")
-    
-    full_reqs = f"Diet: {diet}. Daily Calorie Target: {calories}. Preferences: {preferences}."
-    
-    if st.button("Generate Meal Plan", type="primary"):
-        with st.spinner("Generating and Structuring Plan..."):
-            plan = generate_meal_plan(full_reqs)
-            if plan:
-                st.session_state.meal_plan = plan
-                
-if 'meal_plan' in st.session_state:
-    display_meal_plan(st.session_state.meal_plan)
-else:
-    st.info("Enter your dietary requirements in the sidebar and click 'Generate Meal Plan' to begin.")
+</body>
+</html>
